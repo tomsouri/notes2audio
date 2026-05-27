@@ -1,7 +1,7 @@
 api:
   url: "https://openrouter.ai/api/v1/chat/completions"
   key_env_var: "OPENROUTER_API_KEY"
-  referer: "https://github.com/your-username/notes2audio"
+  referer: "https://github.com/tomsouri/notes2audio"
   timeout: 60
   temperature: 0.1
   models:
@@ -42,10 +42,10 @@ defaults:
   language: "Czech"
   voice: "cs-CZ-AntoninNeural"
   rate: "-20%"
-  output_dir: "oftalmologie"
+  output_dir: "audio"
   filename_pattern: "{stem}.part{index:02d}.mp3"
 
-  # Add more voices for other languages as needed
+  # Add more voices for other languages (supported by Edge TTS) as needed
   available_voices:
     - "cs-CZ-VlastaNeural"
     - "cs-CZ-AntoninNeural"
