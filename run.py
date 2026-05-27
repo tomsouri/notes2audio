@@ -69,12 +69,12 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")  # Set
-MAX_API_CHUNK_CHARS = 5000
+MAX_API_CHUNK_CHARS = 500
 TOTAL_API_COST = 0.0
 
-def _get_chunk_summary(chunk_text: str) -> tuple[str, float]:
+async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chunk_index: int = 0) -> tuple[str, float]:
     """
-    Get a very brief summary of the chunk via API.
+    Get a very brief summary of the raw chunk via API.
     """
     if not API_KEY:
         return "", 0.0
@@ -88,14 +88,28 @@ def _get_chunk_summary(chunk_text: str) -> tuple[str, float]:
     payload = {
         "model": "google/gemini-2.0-flash-lite-001",
         "messages": [
-            {"role": "system", "content": "Provide a single, extremely brief sentence in Czech summarizing the core topics of the provided text. Focus only on high-level subjects (e.g., 'Discussed hypertension symptoms and diagnosis')."},
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert at analyzing raw, messy study notes. "
+                    "Provide a single, extremely brief sentence in Czech summarizing the core topics of the provided raw text. "
+                    "Ignore formatting issues and focus only on high-level subjects (e.g., 'Discussed hypertension symptoms and diagnosis')."
+                )
+            },
             {"role": "user", "content": chunk_text}
         ],
         "temperature": 0.1
     }
 
+    if debug_dir:
+        prompt_file = debug_dir / f"chunk_{chunk_index:03d}_summary_prompt.json"
+        prompt_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+        # Run synchronous requests in a thread to keep it async-friendly
+        response = await asyncio.to_thread(
+            requests.post, url, headers=headers, data=json.dumps(payload), timeout=60
+        )
         response.raise_for_status()
         data = response.json()
         usage = data.get("usage", {})
@@ -107,7 +121,14 @@ def _get_chunk_summary(chunk_text: str) -> tuple[str, float]:
         return "(Summary unavailable)", 0.0
 
 
-def _call_api_for_clean_text(raw_text: str, chunk_index: int, total_chunks: int, history_summary: str) -> tuple[str, float]:
+async def _call_api_for_clean_text(
+    raw_text: str,
+    chunk_index: int,
+    total_chunks: int,
+    previous_summaries: list[str],
+    future_summaries: list[str],
+    debug_dir: Path | None = None
+) -> tuple[str, float]:
     """
     Calls OpenRouter API to refine a single chunk of text with context.
     Returns (refined_text, cost).
@@ -119,8 +140,12 @@ def _call_api_for_clean_text(raw_text: str, chunk_index: int, total_chunks: int,
     url = "https://openrouter.ai/api/v1/chat/completions"
     
     context_msg = f"This is part {chunk_index} of {total_chunks}."
-    if history_summary:
-        context_msg += f"\n\nContext of what was discussed in previous parts:\n{history_summary}"
+    
+    if previous_summaries:
+        context_msg += "\n\nSummaries of previous parts:\n" + "\n".join(previous_summaries)
+    
+    if future_summaries:
+        context_msg += "\n\nSummaries of upcoming parts:\n" + "\n".join(future_summaries)
 
     system_prompt = (
         "You are an expert tutor preparing audio-learning materials. "
@@ -151,8 +176,15 @@ def _call_api_for_clean_text(raw_text: str, chunk_index: int, total_chunks: int,
         "temperature": 0.1
     }
 
+    if debug_dir:
+        prompt_file = debug_dir / f"chunk_{chunk_index:03d}_rewrite_prompt.json"
+        prompt_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+        # Run synchronous requests in a thread to keep it async-friendly
+        response = await asyncio.to_thread(
+            requests.post, url, headers=headers, data=json.dumps(payload), timeout=60
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -176,10 +208,10 @@ def _call_api_for_clean_text(raw_text: str, chunk_index: int, total_chunks: int,
         return raw_text, 0.0
 
 
-def clean_text(raw_text: str, debug_dir: Path | None = None) -> str:
+async def clean_text(raw_text: str, debug_dir: Path | None = None) -> tuple[list[str], list[str]]:
     """
-    Wrapper for clean_text that splits input into parts and merges them into
-    chunks suitable for API calls, maintaining historical context.
+    Splits input into chunks and generates summaries for all of them in parallel.
+    Returns (raw_chunks, all_summaries).
     """
     global TOTAL_API_COST
     
@@ -206,33 +238,63 @@ def clean_text(raw_text: str, debug_dir: Path | None = None) -> str:
     if current_chunk:
         chunks.append("\n\n".join(current_chunk))
         
-    refined_parts = []
-    history_summaries = []
-    
     total_chunks = len(chunks)
+    
+    # 1. First pass: Generate summaries for all (raw) chunks in parallel
+    logger.info(f"Generating summaries for {total_chunks} chunks in parallel...")
+    
+    summary_tasks = []
     for i, chunk in enumerate(chunks, 1):
         if debug_dir:
             (debug_dir / f"chunk_{i:03d}_raw.txt").write_text(chunk, encoding="utf-8")
+        summary_tasks.append(_get_chunk_summary(chunk, debug_dir=debug_dir, chunk_index=i))
+    
+    summary_results = await asyncio.gather(*summary_tasks)
+    
+    all_summaries = []
+    for i, (summary, cost) in enumerate(summary_results, 1):
+        all_summaries.append(f"- Part {i}: {summary}")
+        TOTAL_API_COST += cost
 
-        current_history = "\n".join(history_summaries)
-        logger.info(f"Processing API chunk {i}/{total_chunks}...")
+    return chunks, all_summaries
+
+
+async def rewrite_and_synthesize_chunk(
+    raw_chunk: str,
+    chunk_index: int,
+    total_chunks: int,
+    previous_summaries: list[str],
+    future_summaries: list[str],
+    voice: str,
+    rate: str,
+    mp3_path: Path,
+    debug_dir: Path | None = None
+) -> tuple[str, float]:
+    """
+    Wraps rewriting and TTS synthesis into a single async flow.
+    """
+    global TOTAL_API_COST
+    
+    logger.info(f"Processing API rewrite for chunk {chunk_index}/{total_chunks}...")
+    
+    # 1. Rewrite
+    refined_text, rewrite_cost = await _call_api_for_clean_text(
+        raw_chunk, 
+        chunk_index, 
+        total_chunks, 
+        previous_summaries, 
+        future_summaries, 
+        debug_dir=debug_dir
+    )
+    
+    if debug_dir:
+        (debug_dir / f"chunk_{chunk_index:03d}_cleaned.txt").write_text(refined_text, encoding="utf-8")
         
-        # 1. Rewrite the text with context
-        refined_text, rewrite_cost = _call_api_for_clean_text(chunk, i, total_chunks, current_history)
-        refined_parts.append(refined_text)
-        TOTAL_API_COST += rewrite_cost
-        
-        if debug_dir:
-            (debug_dir / f"chunk_{i:03d}_cleaned.txt").write_text(refined_text, encoding="utf-8")
-
-        # 2. Generate summary for future context (except for the last chunk)
-        if i < total_chunks:
-            logger.info(f"Generating summary for chunk {i} context...")
-            summary, summary_cost = _get_chunk_summary(refined_text)
-            history_summaries.append(f"- Part {i}: {summary}")
-            TOTAL_API_COST += summary_cost
-
-    return "\n\n".join(refined_parts)
+    # 2. Synthesize
+    logger.info(f"Synthesizing Audio for Part {chunk_index}/{total_chunks}...")
+    await synthesize_to_mp3(refined_text, mp3_path, voice=voice, rate=rate)
+    
+    return refined_text, rewrite_cost
 
 
 # ---------------------------------------------------------------------------
@@ -305,13 +367,14 @@ async def synthesize_to_mp3(
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def process_single_pdf(
+async def process_single_pdf(
     pdf_path: Path,
     output_dir: Path,
     voice: str,
     rate: str,
 ) -> None:
     """Full pipeline for one PDF file."""
+    global TOTAL_API_COST
     print(f"\n{'='*60}")
     print(f"Processing: {pdf_path.name}")
     print(f"{'='*60}")
@@ -324,25 +387,47 @@ def process_single_pdf(
     txt_path = output_dir / pdf_path.with_suffix(".extracted.txt").name
     txt_path.write_text(raw_text, encoding="utf-8")
 
-    # Step 2: Clean
-    print("  [2/3] Cleaning text...")
+    # Step 2: Clean & Summarize
+    print("  [2/3] Cleaning and Summarizing text...")
     
     # Create debug directory for chunks
     debug_dir = output_dir / f"{pdf_path.stem}_chunks"
     debug_dir.mkdir(parents=True, exist_ok=True)
     
-    clean = clean_text(raw_text, debug_dir=debug_dir)
-    print(f"         Cleaned text: {len(clean)} characters")
+    raw_chunks, all_summaries = await clean_text(raw_text, debug_dir=debug_dir)
+    total_chunks = len(raw_chunks)
+    
+    # Step 3: Rewrite and Synthesize in parallel
+    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel...")
+    
+    tasks = []
+    for i, chunk in enumerate(raw_chunks, 1):
+        part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
+        mp3_path = output_dir / part_filename
+        
+        previous_summaries = all_summaries[:i-1]
+        future_summaries = all_summaries[i:]
+        
+        tasks.append(rewrite_and_synthesize_chunk(
+            chunk, i, total_chunks, previous_summaries, future_summaries,
+            voice, rate, mp3_path, debug_dir=debug_dir
+        ))
+    
+    results = await asyncio.gather(*tasks)
+    
+    refined_chunks = []
+    for text, cost in results:
+        refined_chunks.append(text)
+        TOTAL_API_COST += cost
+
+    total_chars = sum(len(c) for c in refined_chunks)
+    print(f"         Cleaned text: {total_chars} characters across {len(refined_chunks)} chunks")
 
     # Optionally save intermediate text for inspection / LLM rewriting
+    combined_clean = "\n\n".join(refined_chunks)
     txt_path = output_dir / pdf_path.with_suffix(".txt").name
-    txt_path.write_text(clean, encoding="utf-8")
+    txt_path.write_text(combined_clean, encoding="utf-8")
     print(f"         Intermediate text saved to: {txt_path}")
-
-    # Step 3: Synthesize
-    print("  [3/3] Synthesizing audio...")
-    mp3_path = output_dir / pdf_path.with_suffix(".mp3").name
-    asyncio.run(synthesize_to_mp3(clean, mp3_path, voice=voice, rate=rate))
 
 
 def main() -> None:
@@ -402,13 +487,16 @@ def main() -> None:
 
     print(f"Found {len(pdf_files)} PDF file(s) to convert.")
 
-    for pdf_path in pdf_files:
-        out_dir = args.output_dir or pdf_path.parent
-        out_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            process_single_pdf(pdf_path, out_dir, args.voice, args.rate)
-        except Exception as e:
-            print(f"  ✗ Error processing {pdf_path.name}: {e}", file=sys.stderr)
+    async def run_all():
+        for pdf_path in pdf_files:
+            out_dir = args.output_dir or pdf_path.parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                await process_single_pdf(pdf_path, out_dir, args.voice, args.rate)
+            except Exception as e:
+                print(f"  ✗ Error processing {pdf_path.name}: {e}", file=sys.stderr)
+
+    asyncio.run(run_all())
 
     print(f"\n{'='*60}")
     print(f"Done! Processed {len(pdf_files)} file(s).")
