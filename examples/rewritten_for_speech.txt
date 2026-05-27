@@ -1,0 +1,41 @@
+Vítám vás u prvního dílu našeho audioprůvodce o syntéze řeči.
+
+Úvod
+
+Začněme tím, že si uvědomíme, že jedním z nejznámějších lidí, kteří používali syntézu řeči ke komunikaci, byl Stephen Hawking.
+
+Syntéza řeči
+
+Syntéza řeči je umělá tvorba lidské řeči. Počítačové programy, které se k tomuto účelu používají, se nazývají syntezátory řeči. Existují různé typy těchto programů. Programy, které se nazývají text-to-speech, zkráceně TTS, produkují řeč z textu psaného běžným jazykem. Existují i programy, které jako vstup využívají fonetickou transkripci. Řeč může být tvořena spojením úseků nahrané řeči, které jsou uloženy v databázi. Tyto databáze mohou obsahovat například fóny a difóny, což jsou základní stavební kameny řeči, nebo celá slova. V prvním případě je upřednostňována kvantita možného výsledku před kvalitou, zatímco ve druhém je to naopak. Některé syntezátory mohou řeč tvořit simulací charakteristik lidské řeči a vytvářet tak doslova umělou řeč. Kvalita syntezátoru řeči se posuzuje podle podobnosti výstupu s lidskou řečí. Schopné programy umožňují lidem se zrakovými vadami nebo poruchami čtení poslouchat psané texty. Mnoho operačních systémů obsahuje syntetizátory řeči již od počátku 80. let.
+
+Vývoj technologií
+
+V září roku 2016 představila společnost DeepMind model WaveNet, který ukázal, že neuronové sítě za použití hlubokého učení dokážou modelovat surové zvukové vlny a generovat řeč z akustických reprezentací, jako jsou spektrogramy. Tím položil základy moderní syntézy řeči založené na hlubokém učení. Původní verze byla výpočetně náročná, avšak o rok později vznikl výrazně rychlejší model Parallel WaveNet. Na to navázal systém Tacotron 2 od Google AI z roku 2018, který dokázal produkovat přirozeněji znějící řeč, ale vyžadoval velké množství trénovacích dat, v řádu desítek hodin nahrávek. Při menším objemu dat kvalita výrazně klesala a při velmi krátkém tréninku nebyla řeč ani srozumitelná. V roce 2019 představila společnost Microsoft Research model FastSpeech, jenž řešil problémy s rychlostí u autoregresivních modelů, jako byl Tacotron 2. Ve stejném roce vznikl také HiFi-GAN, vocoder založený na generativních adversariálních sítích, který umožnil efektivní generování vysoce kvalitní řeči. V roce 2020 byl uveden Glow-TTS, jenž využil flow-based přístup pro rychlou inferenci a zároveň umožnil přenos stylu hlasu mezi různými projevy.
+
+Nové platformy a aplikace
+
+V březnu 2020 byla spuštěna platforma 15.ai, která získala v roce 2021 mezinárodní pozornost díky schopnosti generovat emocionálně expresivní hlasy fiktivních postav s minimem dat. Tvůrce uvedl, že k věrnému napodobení hlasu stačí přibližně 15 sekund záznamu, což znamenalo zásadní snížení datových nároků. Platforma přispěla k popularizaci klonování hlasu v internetové kultuře, ale také k prvním případům zneužití, například podvodu s NFT v roce 2022. V roce 2023 uvedla společnost ElevenLabs vlastní webovou službu pro syntézu řeči s pokročilou analýzou kontextu a emocí. V roce 2024 pak OpenAI potvrdila možnost klonování hlasu z 15vteřinové nahrávky, avšak svůj nástroj Voice Engine označila za příliš rizikový pro veřejné zpřístupnění.
+
+Tímto končí první část našeho povídání o syntéze řeči. V příštím díle se budeme věnovat výzvám, příležitostem a rizikům spojeným se syntetickými hlasy a syntézou řeči.
+
+Pokračujeme v našem zkoumání syntézy řeči, a nyní se zaměříme na výzvy a příležitosti, které s sebou syntetické hlasy přinášejí.
+
+12. Zvládání výzev a příležitostí u syntetických hlasů.
+
+Pro hlubší pochopení této problematiky se můžeme podívat na článek publikovaný na webových stránkách openai.com, který byl zpřístupněn online 15. února 2024 a citován 7. dubna 2026. Tento článek se zabývá navigací v náročných aspektech a příležitostech, které syntetické hlasy nabízejí.
+
+13. Další zdroje a informace.
+
+Dále se můžeme seznámit s článkem od Alexe Herna, editora pro technologii ve Velké Británii, publikovaným v The Guardian 31. března 2024. Článek pojednává o tom, že společnost OpenAI považuje svůj nástroj pro klonování hlasu za příliš riskantní pro obecné použití. Tento článek je dostupný online a byl citován 7. dubna 2026.
+
+Doplňující materiály.
+
+Pro vizuální a zvukové materiály k tématu syntézy řeči můžeme navštívit Wikimedia Commons.
+
+Autoritní data.
+
+Pro další informace a autoritní data se můžeme obrátit na různé zdroje. Patří sem Národní knihovna České republiky, označená jako NKC, s identifikátorem ph351275. Dále se můžeme podívat na systém PSH, což je systém pro vyhledávání hesel, s identifikátorem 13788. Pro hudební aspekty můžeme využít MusicBrainz, s identifikátorem b0f83029-6d38-4f6f-bd30-db44e427f497. Dalšími zdroji jsou Národní dietní knihovna Japonska, označená jako NDL, s identifikátorem 00575464, a Národní knihovna Izraele, označená jako NLI, s identifikátorem 987007565841305171.
+
+Závěrem.
+
+Tyto informace byly citovány z české Wikipedie, konkrétně z článku o syntéze řeči.

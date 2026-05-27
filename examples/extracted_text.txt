@@ -1,0 +1,115 @@
+Stephen Hawking byl jeden z
+nejznámějších lidí, kteří ke
+komunikaci používali syntézu řeči.
+Syntéza řeči
+Syntéza řeči je umělá tvorba lidské řeči. Počítačové programy používané k tomuto účelu se nazývají „syntezátory řeči“.
+Programy „text na řeč“ (text-to-speech, TTS) produkují řeč z textu psaného běžným jazykem; existují i programy, které
+jako vstup využívají fonetickou transkripci.[1] Řeč může být tvořena spojováním úseků nahrané řeči, které jsou uloženy
+v databázi. Takovéto databáze mohou obsahovat např. fóny a difóny nebo celá slova. V prvním případě je kvantita
+možného výsledku upřednostňována před kvalitou, v druhém je to naopak. Některé syntetizátory mohou řeč tvořit
+simulací charakteristik lidské řeči a vytvářet tak doslova umělou řeč.[2]
+Kvalita syntetizátoru řeči se posuzuje podle podobnosti výstupu s lidskou řečí. Schopné programy umožňují lidem se
+zrakovými vadami nebo poruchami čtení poslouchat psané texty. Mnoho operačních systémů obsahuje syntetizátory
+řeči od počátku 80. let.
+V září 2016 představila společnost DeepMind model WaveNet, který ukázal, že neuronové sítě za použití hlubokého
+učení dokážou modelovat surové zvukové vlny a generovat řeč z akustických reprezentací, jako jsou spektrogramy. Tím
+položil základy moderní syntézy řeči založené na hlubokém učení. Původní verze byla výpočetně náročná, avšak o rok
+později vznikl výrazně rychlejší model Parallel WaveNet. Na to navázal systém Tacotron 2 od Google AI (2018), který
+dokázal produkovat přirozeněji znějící řeč, ale vyžadoval velké množství trénovacích dat (desítky hodin nahrávek). Při
+menším objemu dat kvalita výrazně klesala a při velmi krátkém tréninku nebyla řeč ani srozumitelná.[3][4]
+V roce 2019 představila Microsoft Research model FastSpeech, jenž řešil problémy s rychlostí u autoregresivních
+modelů, jako byl Tacotron 2.[5] Ve stejném roce vznikl také HiFi-GAN, vocoder založený na generativních adversariálních sítích, který umožnil efektivní
+generování vysoce kvalitní řeči. V roce 2020 byl uveden Glow-TTS, jenž využil ﬂow-based přístup pro rychlou inferenci a zároveň umožnil přenos stylu hlasu mezi
+různými projevy.[6]
+V březnu 2020 byla spuštěna platforma 15.ai, která získala v roce 2021 mezinárodní pozornost díky schopnosti generovat emocionálně expresivní hlasy ﬁktivních
+postav s minimem dat.[7] Tvůrce uvedl, že k věrnému napodobení hlasu stačí přibližně 15 sekund záznamu, což znamenalo zásadní snížení datových nároků.[8]
+Platforma přispěla k popularizaci klonování hlasu v internetové kultuře,[9] ale také k prvním případům zneužití, například podvodu s NFT v roce 2022.[10]
+V roce 2023 uvedla společnost ElevenLabs vlastní webovou službu pro syntézu řeči s pokročilou analýzou kontextu a emocí.[11] V roce 2024 pak OpenAI potvrdila
+možnost klonování hlasu z 15vteřinové nahrávky, avšak svůj nástroj Voice Engine označila za příliš rizikový pro veřejné zpřístupnění.[12][13]
+V tomto článku byl použit překlad textu z článku Speech synthesis (https://en.wikipedia.org/wiki/Speech_synthesis?oldid=462142468) na anglické Wikipedii.
+1. Jonathan Allen, M. Sharon Hunnicutt, Dennis Klatt, From Text
+to Speech: The MITalk system. Cambridge University Press:
+1987. ISBN 0-521-30641-8
+2. RUBIN, P.; BAER, T.; MERMELSTEIN, P. An articulatory
+synthesizer for perceptual research. Journal of the Acoustical
+Society of America. 1981, s. 321–328. doi:10.1121/1.386780
+(https://doi.org/10.1121%2F1.386780).
+3. BABUSCHKIN, Aäron van den Oord, Yazhe Li, Igor. High-
+ﬁdelity speech synthesis with WaveNet. Google DeepMind
+[online]. 2017-11-22 [cit. 2026-04-07]. Dostupné online (http
+s://deepmind.google/blog/high-ﬁdelity-speech-synthesis-wit
+h-wavenet/). (anglicky)
+4. Audio samples from "Semi-Supervised Training for Improving
+Data Eﬃciency in End-to-End Speech Synthesis".
+google.github.io [online]. [cit. 2026-04-07]. Dostupné online
+(https://google.github.io/tacotron/publications/semisupervise
+d/index.html).
+5. REN, Yi; RUAN, Yangjun; TAN, Xu. FastSpeech: Fast, Robust
+and Controllable Text to Speech. arXiv.org [online].
+2019-05-22 [cit. 2026-04-07]. Dostupné online (https://arxi
+v.org/abs/1905.09263v5). (anglicky)
+6. Electrical Engineering and Systems Science. arxiv.org
+[online]. [cit. 2026-04-07]. Dostupné online (https://arxiv.org/
+archive/eess.AS).
+7. Insolite : un site permet de faire dire ce que vous souhaitez
+à GlaDOS (et à d'autres personnages de jeux vidéo).
+clubic.com [online]. 2021-01-24 [cit. 2026-04-07]. Dostupné
+online (https://www.clubic.com/technologies-d-avenir/intellig
+ence-artiﬁcielle/actualite-349691-insolite-un-site-permet-de-f
+aire-dire-ce-que-vous-souhaitez-a-glados-et-a-d-autres-perso
+nnages-de-jeux-video-.html). (francouzsky)
+8. AKINSANMI, 'Sola. 15.ai Creator reveals journey from MIT
+Project to internet phenomenon [online]. 2024-12-10 [cit.
+2026-04-07]. Dostupné online (https://guardian.ng/technolog
+y/15-ai-creator-reveals-journey-from-mit-project-to-internet-p
+henomenon/). (anglicky)
+9. MAGAZINE, Analytics India. Analytics India Magazine.
+analyticsindiamag.com [online]. [cit. 2026-04-07]. Dostupné
+online (https://analyticsindiamag.com/ai-origins-evolution/de
+epfakes-are-elevating-meme-culture-but-at-what-cost/).
+(anglicky)
+10. PHILLIPS, Tom. Troy Baker-backed NFT ﬁrm admits using
+voice lines taken from another service without permission.
+Eurogamer.net [online]. 2022-01-17 [cit. 2026-04-07].
+Dostupné online (https://www.eurogamer.net/troy-baker-back
+ed-nft-ﬁrm-admits-using-voice-lines-taken-from-another-servi
+ce-without-permission). (anglicky)
+11. STAFF, WIRED. This Podcast Is Not Hosted by AI Voice
+Clones. We Swear. Wired. Dostupné online (https://www.wire
+d.com/story/gadget-lab-podcast-594/) [cit. 2026-04-07].
+ISSN 1059-1028 (https://worldcat.org/issn/1059-1028).
+(anglicky)
+Umělá inteligence
+Odkazy
+Reference
+Syntéza řeči – Wikipedie
+https://cs.wikipedia.org/wiki/Synt%C3%A9za_%C5%...
+1 of 2
+5/27/26, 18:52
+
+
+12. Zvládání výzev a příležitostí u syntetických hlasů.
+openai.com [online]. 2024-02-15 [cit. 2026-04-07]. Dostupné
+online (https://openai.com/cs-CZ/index/navigating-the-challe
+nges-and-opportunities-of-synthetic-voices/).
+13. HERN, Alex; EDITOR, Alex Hern UK technology. OpenAI
+deems its voice cloning tool too risky for general release.
+The Guardian. 2024-03-31. Dostupné online (https://www.the
+guardian.com/technology/2024/mar/31/openai-deems-its-voi
+ce-cloning-tool-too-risky-for-general-release) [cit.
+2026-04-07]. ISSN 0261-3077 (https://worldcat.org/issn/026
+1-3077). (anglicky)
+▪ 
+Obrázky, zvuky či videa k tématu syntéza řeči na Wikimedia Commons
+Autoritní data
+NKC: ph351275 (https://aleph.nkp.cz/F/?func=ﬁnd-c&local_base=aut&ccl_term=ica=ph351275) •
+PSH: 13788 (https://psh.techlib.cz/skos/PSH13788) •
+MBI: b0f83029-6d38-4f6f-bd30-db44e427f497 (https://musicbrainz.org/instrument/b0f83029-6d38-4f6f-bd30-db44e427f497)
+• NDL: 00575464 (https://id.ndl.go.jp/auth/ndlna/00575464) •
+NLI: 987007565841305171 (https://www.nli.org.il/en/authorities/987007565841305171)
+Citováno z „https://cs.wikipedia.org/w/index.php?title=Syntéza_řeči&oldid=25796040“
+Externí odkazy
+Syntéza řeči – Wikipedie
+https://cs.wikipedia.org/wiki/Synt%C3%A9za_%C5%...
+2 of 2
+5/27/26, 18:52
