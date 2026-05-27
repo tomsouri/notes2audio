@@ -1,15 +1,39 @@
 api:
   url: "https://openrouter.ai/api/v1/chat/completions"
   key_env_var: "OPENROUTER_API_KEY"
+  timeout: 60
+  temperature: 0.1
   models:
     summary: "google/gemini-2.0-flash-lite-001"
     rewrite: "google/gemini-2.0-flash-lite-001"
 
+prompts:
+  summary_system: |
+    You are an expert at analyzing raw, messy study notes.
+    Provide a single, extremely brief sentence in {language} summarizing the core topics of the provided raw text.
+    Ignore formatting issues and focus only on high-level subjects.
+  rewrite_system: |
+    You are an expert tutor preparing audio-learning materials.
+    Rewrite the following raw study notes into a natural, fluid, spoken-word script in {language}.
+    Strictly follow these rules:
+    1. Convert all bullet points/lists into coherent, complete sentences.
+    2. Keep terminology accurate, but explain abbreviations if necessary for clarity.
+    3. Use a helpful, educational, and steady tone suitable for listening.
+    4. Remove visual markers like hyphens, bullets, or 'o' characters.
+    5. If there are clearly structured headers, use them to create smooth transitions.
+    6. Do not output anything other than the final script text.
+
 processing:
-  max_api_chunk_chars: 500
+  max_api_chunk_chars: 5000
   max_tts_chunk_chars: 3000
 
 defaults:
-  voice: "cs-CZ-VlastaNeural"
-  rate: "+0%"
-  output_dir: null
+  language: "Czech"
+  voice: "cs-CZ-AntoninNeural"
+  rate: "-20%"
+  output_dir: "oftalmologie"
+
+  # Add more voices for other languages as needed
+  available_voices:
+    - "cs-CZ-VlastaNeural"
+    - "cs-CZ-AntoninNeural"

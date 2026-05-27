@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pdf2audio.py — Convert PDF files to Czech audio (MP3) using PyMuPDF + edge-tts.
+pdf2audio.py — Convert PDF files to audio (MP3) using PyMuPDF + edge-tts (OpenRouter for cleaning).
 
 Usage:
     # Single file
@@ -37,19 +37,41 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
         "api": {
             "url": "https://openrouter.ai/api/v1/chat/completions",
             "key_env_var": "OPENROUTER_API_KEY",
+            "timeout": 60,
+            "temperature": 0.1,
             "models": {
                 "summary": "google/gemini-2.0-flash-lite-001",
                 "rewrite": "google/gemini-2.0-flash-lite-001"
             }
+        },
+        "prompts": {
+            "summary_system": (
+                "You are an expert at analyzing raw, messy study notes. "
+                "Provide a single, extremely brief sentence in {language} summarizing the core topics of the provided raw text. "
+                "Ignore formatting issues and focus only on high-level subjects."
+            ),
+            "rewrite_system": (
+                "You are an expert tutor preparing audio-learning materials. "
+                "Rewrite the following raw study notes into a natural, fluid, spoken-word script in {language}. "
+                "Strictly follow these rules:\n"
+                "1. Convert all bullet points/lists into coherent, complete sentences.\n"
+                "2. Keep terminology accurate, but explain abbreviations if necessary for clarity.\n"
+                "3. Use a helpful, educational, and steady tone suitable for listening.\n"
+                "4. Remove visual markers like hyphens, bullets, or 'o' characters.\n"
+                "5. If there are clearly structured headers, use them to create smooth transitions.\n"
+                "6. Do not output anything other than the final script text."
+            )
         },
         "processing": {
             "max_api_chunk_chars": 500,
             "max_tts_chunk_chars": 3000
         },
         "defaults": {
+            "language": "Czech",
             "voice": "cs-CZ-VlastaNeural",
             "rate": "+0%",
-            "output_dir": None
+            "output_dir": None,
+            "available_voices": ["cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"]
         }
     }
     
@@ -60,7 +82,7 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
         with open(config_path, "r", encoding="utf-8") as f:
             user_config = yaml.safe_load(f)
             # Simple merge (could be more robust with deep merge if needed)
-            for section in ["api", "processing", "defaults"]:
+            for section in ["api", "prompts", "processing", "defaults"]:
                 if section in user_config:
                     default_config[section].update(user_config[section])
             return default_config
@@ -125,20 +147,20 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/your-username/study-helper",
     }
+    
+    language = CONFIG["defaults"].get("language", "Czech")
+    system_prompt = CONFIG["prompts"]["summary_system"].format(language=language)
+    
     payload = {
         "model": CONFIG["api"]["models"]["summary"],
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "You are an expert at analyzing raw, messy study notes. "
-                    "Provide a single, extremely brief sentence in Czech summarizing the core topics of the provided raw text. "
-                    "Ignore formatting issues and focus only on high-level subjects (e.g., 'Discussed hypertension symptoms and diagnosis')."
-                )
+                "content": system_prompt
             },
             {"role": "user", "content": chunk_text}
         ],
-        "temperature": 0.1
+        "temperature": CONFIG["api"]["temperature"]
     }
 
     if debug_dir:
@@ -148,7 +170,7 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
     try:
         # Run synchronous requests in a thread to keep it async-friendly
         response = await asyncio.to_thread(
-            requests.post, url, headers=headers, data=json.dumps(payload), timeout=60
+            requests.post, url, headers=headers, data=json.dumps(payload), timeout=CONFIG["api"]["timeout"]
         )
         response.raise_for_status()
         data = response.json()
@@ -187,17 +209,8 @@ async def _call_api_for_clean_text(
     if future_summaries:
         context_msg += "\n\nSummaries of upcoming parts:\n" + "\n".join(future_summaries)
 
-    system_prompt = (
-        "You are an expert tutor preparing audio-learning materials. "
-        "Rewrite the following raw study notes into a natural, fluid, spoken-word script in Czech. "
-        "Strictly follow these rules:\n"
-        "1. Convert all bullet points/lists into coherent, complete sentences.\n"
-        "2. Keep medical terminology accurate, but explain abbreviations if necessary for clarity.\n"
-        "3. Use a helpful, educational, and steady tone suitable for listening.\n"
-        "4. Remove visual markers like hyphens, bullets, or 'o' characters.\n"
-        "5. If there are clearly structured headers, use them to create smooth transitions.\n"
-        "6. Do not output anything other than the final script text."
-    )
+    language = CONFIG["defaults"].get("language", "Czech")
+    system_prompt = CONFIG["prompts"]["rewrite_system"].format(language=language)
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -213,7 +226,7 @@ async def _call_api_for_clean_text(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "temperature": 0.1
+        "temperature": CONFIG["api"]["temperature"]
     }
 
     if debug_dir:
@@ -223,7 +236,7 @@ async def _call_api_for_clean_text(
     try:
         # Run synchronous requests in a thread to keep it async-friendly
         response = await asyncio.to_thread(
-            requests.post, url, headers=headers, data=json.dumps(payload), timeout=60
+            requests.post, url, headers=headers, data=json.dumps(payload), timeout=CONFIG["api"]["timeout"]
         )
         response.raise_for_status()
         data = response.json()
@@ -331,8 +344,10 @@ async def rewrite_and_synthesize_chunk(
         (debug_dir / f"chunk_{chunk_index:03d}_cleaned.txt").write_text(refined_text, encoding="utf-8")
         
     # 2. Synthesize
-    logger.info(f"Synthesizing Audio for Part {chunk_index}/{total_chunks}...")
-    await synthesize_to_mp3(refined_text, mp3_path, voice=voice, rate=rate)
+    await synthesize_to_mp3(
+        refined_text, mp3_path, voice=voice, rate=rate,
+        label=f"Part {chunk_index}/{total_chunks}"
+    )
     
     return refined_text, rewrite_cost
 
@@ -380,6 +395,7 @@ async def synthesize_to_mp3(
     output_path: Path,
     voice: str = CONFIG["defaults"]["voice"],
     rate: str = CONFIG["defaults"]["rate"],
+    label: str = "",
 ) -> None:
     """
     Convert text to MP3 using edge-tts.
@@ -391,16 +407,36 @@ async def synthesize_to_mp3(
 
     chunks = split_into_chunks(text)
     total = len(chunks)
+    prefix = f"[{label}] " if label else ""
 
     with open(output_path, "wb") as out_file:
         for i, chunk in enumerate(chunks, start=1):
-            print(f"    Synthesizing chunk {i}/{total} ({len(chunk)} chars)...")
-            communicate = edge_tts.Communicate(chunk, voice, rate=rate)
-            async for message in communicate.stream():
-                if message["type"] == "audio":
-                    out_file.write(message["data"])
+            # Skip chunks that only contain punctuation or whitespace to avoid "No audio was received" error
+            if not any(c.isalnum() for c in chunk):
+                logger.warning(f"{prefix}Skipping non-speakable chunk {i}/{total} ({len(chunk)} chars): '{chunk}'")
+                continue
 
-    print(f"    ✓ Saved: {output_path}  ({output_path.stat().st_size / 1024:.0f} KB)")
+            logger.info(f"{prefix}Synthesizing chunk {i}/{total} ({len(chunk)} chars)...")
+            communicate = edge_tts.Communicate(chunk, voice, rate=rate)
+            try:
+                audio_count = 0
+                async for message in communicate.stream():
+                    if message["type"] == "audio":
+                        out_file.write(message["data"])
+                        audio_count += 1
+                if audio_count == 0:
+                    logger.warning(f"{prefix}No audio recovered for chunk {i}/{total}")
+            except Exception as e:
+                if "No audio was received" in str(e):
+                    logger.warning(f"{prefix}Service returned no audio for chunk {i}/{total}: {e}")
+                else:
+                    logger.error(f"{prefix}Error synthesizing chunk {i}/{total}: {e}")
+                    raise
+
+    if output_path.exists() and output_path.stat().st_size > 0:
+        logger.info(f"{prefix}✓ Saved: {output_path}  ({output_path.stat().st_size / 1024:.0f} KB)")
+    else:
+        logger.warning(f"{prefix}⚠ No audio generated for: {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -443,13 +479,24 @@ async def process_single_pdf(
             print(f"         Error: No cleaned chunks found in {debug_dir}.")
             return
             
-        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks...")
+        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks (max 5 at once)...")
+        
+        sem = asyncio.Semaphore(5)
+        
+        async def synth_with_sem(text, path, v, r, l):
+            async with sem:
+                await synthesize_to_mp3(text, path, voice=v, rate=r, label=l)
+
         tasks = []
+        total_parts = len(cleaned_files)
         for i, cleaned_file in enumerate(cleaned_files, 1):
             refined_text = cleaned_file.read_text(encoding="utf-8")
             part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
             mp3_path = output_dir / part_filename
-            tasks.append(synthesize_to_mp3(refined_text, mp3_path, voice=voice, rate=rate))
+            tasks.append(synth_with_sem(
+                refined_text, mp3_path, voice, rate,
+                f"Part {i}/{total_parts}"
+            ))
         
         await asyncio.gather(*tasks)
         print("         Synthesis complete.")
@@ -464,8 +511,16 @@ async def process_single_pdf(
     total_chunks = len(raw_chunks)
     
     # Step 3: Rewrite and Synthesize in parallel
-    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel...")
+    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel (max 5 at once)...")
     
+    sem = asyncio.Semaphore(5)
+    
+    async def process_with_sem(chunk, i, tp, ps, fs, v, r, mp, dd):
+        async with sem:
+            return await rewrite_and_synthesize_chunk(
+                chunk, i, tp, ps, fs, v, r, mp, debug_dir=dd
+            )
+
     tasks = []
     for i, chunk in enumerate(raw_chunks, 1):
         part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
@@ -474,9 +529,9 @@ async def process_single_pdf(
         previous_summaries = all_summaries[:i-1]
         future_summaries = all_summaries[i:]
         
-        tasks.append(rewrite_and_synthesize_chunk(
+        tasks.append(process_with_sem(
             chunk, i, total_chunks, previous_summaries, future_summaries,
-            voice, rate, mp3_path, debug_dir=debug_dir
+            voice, rate, mp3_path, debug_dir
         ))
     
     results = await asyncio.gather(*tasks)
@@ -498,7 +553,7 @@ async def process_single_pdf(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Convert PDF study notes to Czech audio files (MP3).",
+        description="Convert PDF study notes to audio files (MP3).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
@@ -516,10 +571,15 @@ def main() -> None:
         help="PDF file(s) or director(ies) containing PDFs.",
     )
     parser.add_argument(
+        "--language",
+        default=CONFIG["defaults"]["language"],
+        help=f"Language for summaries and rewriting (default: {CONFIG['defaults']['language']}).",
+    )
+    parser.add_argument(
         "--voice",
         default=CONFIG["defaults"]["voice"],
-        choices=["cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"],
-        help=f"Czech TTS voice (default: {CONFIG['defaults']['voice']}).",
+        choices=CONFIG["defaults"]["available_voices"],
+        help=f"TTS voice (default: {CONFIG['defaults']['voice']}).",
     )
     parser.add_argument(
         "--rate",
@@ -539,6 +599,11 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Update global config with command-line overrides
+    CONFIG["defaults"]["language"] = args.language
+    CONFIG["defaults"]["voice"] = args.voice
+    CONFIG["defaults"]["rate"] = args.rate
 
     # Collect all PDF paths
     pdf_files: list[Path] = []
