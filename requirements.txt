@@ -1,0 +1,4 @@
+PyMuPDF
+edge-tts
+PyYAML
+requests
