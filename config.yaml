@@ -1,0 +1,15 @@
+api:
+  url: "https://openrouter.ai/api/v1/chat/completions"
+  key_env_var: "OPENROUTER_API_KEY"
+  models:
+    summary: "google/gemini-2.0-flash-lite-001"
+    rewrite: "google/gemini-2.0-flash-lite-001"
+
+processing:
+  max_api_chunk_chars: 500
+  max_tts_chunk_chars: 3000
+
+defaults:
+  voice: "cs-CZ-VlastaNeural"
+  rate: "+0%"
+  output_dir: null
