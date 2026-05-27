@@ -37,11 +37,16 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
         "api": {
             "url": "https://openrouter.ai/api/v1/chat/completions",
             "key_env_var": "OPENROUTER_API_KEY",
+            "referer": "https://github.com/your-username/notes2audio",
             "timeout": 60,
             "temperature": 0.1,
             "models": {
                 "summary": "google/gemini-2.0-flash-lite-001",
                 "rewrite": "google/gemini-2.0-flash-lite-001"
+            },
+            "cost_per_1m_tokens": {
+                "input": 0.075,
+                "output": 0.30
             }
         },
         "prompts": {
@@ -60,18 +65,24 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
                 "4. Remove visual markers like hyphens, bullets, or 'o' characters.\n"
                 "5. If there are clearly structured headers, use them to create smooth transitions.\n"
                 "6. Do not output anything other than the final script text."
-            )
+            ),
+            "context_before": "Summaries of previous parts:",
+            "context_after": "Summaries of upcoming parts:",
+            "chunk_intro": "This is part {index} of {total}."
         },
         "processing": {
             "max_api_chunk_chars": 500,
-            "max_tts_chunk_chars": 3000
+            "max_tts_chunk_chars": 3000,
+            "max_concurrent_tasks": 5,
+            "cleanup_replacements": [["*", ""], ["#", ""]]
         },
         "defaults": {
             "language": "Czech",
             "voice": "cs-CZ-VlastaNeural",
             "rate": "+0%",
             "output_dir": None,
-            "available_voices": ["cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"]
+            "available_voices": ["cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"],
+            "filename_pattern": "{stem}.part{index:02d}.mp3"
         }
     }
     
@@ -145,7 +156,7 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/your-username/study-helper",
+        "HTTP-Referer": CONFIG["api"].get("referer", "https://github.com/your-username/notes2audio"),
     }
     
     language = CONFIG["defaults"].get("language", "Czech")
@@ -201,13 +212,14 @@ async def _call_api_for_clean_text(
 
     url = CONFIG["api"]["url"]
     
-    context_msg = f"This is part {chunk_index} of {total_chunks}."
+    chunk_intro = CONFIG["prompts"]["chunk_intro"].format(index=chunk_index, total=total_chunks)
+    context_msg = f"{chunk_intro}"
     
     if previous_summaries:
-        context_msg += "\n\nSummaries of previous parts:\n" + "\n".join(previous_summaries)
+        context_msg += f"\n\n{CONFIG['prompts']['context_before']}\n" + "\n".join(previous_summaries)
     
     if future_summaries:
-        context_msg += "\n\nSummaries of upcoming parts:\n" + "\n".join(future_summaries)
+        context_msg += f"\n\n{CONFIG['prompts']['context_after']}\n" + "\n".join(future_summaries)
 
     language = CONFIG["defaults"].get("language", "Czech")
     system_prompt = CONFIG["prompts"]["rewrite_system"].format(language=language)
@@ -215,7 +227,7 @@ async def _call_api_for_clean_text(
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/your-username/study-helper",
+        "HTTP-Referer": CONFIG["api"].get("referer", "https://github.com/your-username/notes2audio"),
     }
 
     user_content = f"{context_msg}\n\nStudy notes to rewrite:\n\n{raw_text}"
@@ -247,14 +259,20 @@ async def _call_api_for_clean_text(
         cost = usage.get("cost")
         
         if cost is None:
-            input_cost = (prompt_tokens / 1_000_000) * 0.075
-            output_cost = (completion_tokens / 1_000_000) * 0.30
+            input_rate = CONFIG["api"]["cost_per_1m_tokens"]["input"]
+            output_rate = CONFIG["api"]["cost_per_1m_tokens"]["output"]
+            input_cost = (prompt_tokens / 1_000_000) * input_rate
+            output_cost = (completion_tokens / 1_000_000) * output_rate
             cost = input_cost + output_cost
 
         logger.info(f"OpenRouter rewrite chunk {chunk_index}: {prompt_tokens} prompt + {completion_tokens} completion tokens. Cost: ${cost:.6f}")
 
         text = data['choices'][0]['message']['content'].strip()
-        text = text.replace("*", "")
+        
+        # Apply cleanup replacements from config
+        for old, new in CONFIG["processing"].get("cleanup_replacements", []):
+            text = text.replace(old, new)
+            
         return text, cost
     except Exception as e:
         logger.error(f"Error calling OpenRouter API: {e}")
@@ -479,9 +497,9 @@ async def process_single_pdf(
             print(f"         Error: No cleaned chunks found in {debug_dir}.")
             return
             
-        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks (max 5 at once)...")
+        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
         
-        sem = asyncio.Semaphore(5)
+        sem = asyncio.Semaphore(CONFIG["processing"]["max_concurrent_tasks"])
         
         async def synth_with_sem(text, path, v, r, l):
             async with sem:
@@ -491,7 +509,7 @@ async def process_single_pdf(
         total_parts = len(cleaned_files)
         for i, cleaned_file in enumerate(cleaned_files, 1):
             refined_text = cleaned_file.read_text(encoding="utf-8")
-            part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
+            part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=pdf_path.stem, index=i)
             mp3_path = output_dir / part_filename
             tasks.append(synth_with_sem(
                 refined_text, mp3_path, voice, rate,
@@ -511,9 +529,9 @@ async def process_single_pdf(
     total_chunks = len(raw_chunks)
     
     # Step 3: Rewrite and Synthesize in parallel
-    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel (max 5 at once)...")
+    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
     
-    sem = asyncio.Semaphore(5)
+    sem = asyncio.Semaphore(CONFIG["processing"]["max_concurrent_tasks"])
     
     async def process_with_sem(chunk, i, tp, ps, fs, v, r, mp, dd):
         async with sem:
@@ -523,7 +541,7 @@ async def process_single_pdf(
 
     tasks = []
     for i, chunk in enumerate(raw_chunks, 1):
-        part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
+        part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=pdf_path.stem, index=i)
         mp3_path = output_dir / part_filename
         
         previous_summaries = all_summaries[:i-1]

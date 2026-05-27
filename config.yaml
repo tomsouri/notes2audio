@@ -1,11 +1,15 @@
 api:
   url: "https://openrouter.ai/api/v1/chat/completions"
   key_env_var: "OPENROUTER_API_KEY"
+  referer: "https://github.com/your-username/notes2audio"
   timeout: 60
   temperature: 0.1
   models:
     summary: "google/gemini-2.0-flash-lite-001"
     rewrite: "google/gemini-2.0-flash-lite-001"
+  cost_per_1m_tokens:
+    input: 0.075
+    output: 0.30
 
 prompts:
   summary_system: |
@@ -22,16 +26,24 @@ prompts:
     4. Remove visual markers like hyphens, bullets, or 'o' characters.
     5. If there are clearly structured headers, use them to create smooth transitions.
     6. Do not output anything other than the final script text.
+  context_before: "Summaries of previous parts:"
+  context_after: "Summaries of upcoming parts:"
+  chunk_intro: "This is part {index} of {total}."
 
 processing:
   max_api_chunk_chars: 5000
   max_tts_chunk_chars: 3000
+  max_concurrent_tasks: 5
+  cleanup_replacements:
+    - ["*", ""]
+    - ["#", ""]
 
 defaults:
   language: "Czech"
   voice: "cs-CZ-AntoninNeural"
   rate: "-20%"
   output_dir: "oftalmologie"
+  filename_pattern: "{stem}.part{index:02d}.mp3"
 
   # Add more voices for other languages as needed
   available_voices:
