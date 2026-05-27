@@ -29,6 +29,46 @@ import requests
 import json
 import os
 import logging
+import yaml
+
+def load_config(config_path: Path = Path("config.yaml")) -> dict:
+    """Load configuration from a YAML file, falling back to defaults."""
+    default_config = {
+        "api": {
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "key_env_var": "OPENROUTER_API_KEY",
+            "models": {
+                "summary": "google/gemini-2.0-flash-lite-001",
+                "rewrite": "google/gemini-2.0-flash-lite-001"
+            }
+        },
+        "processing": {
+            "max_api_chunk_chars": 500,
+            "max_tts_chunk_chars": 3000
+        },
+        "defaults": {
+            "voice": "cs-CZ-VlastaNeural",
+            "rate": "+0%",
+            "output_dir": None
+        }
+    }
+    
+    if not config_path.exists():
+        return default_config
+    
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            user_config = yaml.safe_load(f)
+            # Simple merge (could be more robust with deep merge if needed)
+            for section in ["api", "processing", "defaults"]:
+                if section in user_config:
+                    default_config[section].update(user_config[section])
+            return default_config
+    except Exception as e:
+        print(f"Warning: Failed to load config from {config_path}: {e}. Using defaults.")
+        return default_config
+
+CONFIG = load_config()
 
 # ---------------------------------------------------------------------------
 # Setup Logging
@@ -68,8 +108,8 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
 # Step 2: Text cleanup
 # ---------------------------------------------------------------------------
 
-API_KEY = os.getenv("OPENROUTER_API_KEY")  # Set
-MAX_API_CHUNK_CHARS = 500
+API_KEY = os.getenv(CONFIG["api"]["key_env_var"])
+MAX_API_CHUNK_CHARS = CONFIG["processing"]["max_api_chunk_chars"]
 TOTAL_API_COST = 0.0
 
 async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chunk_index: int = 0) -> tuple[str, float]:
@@ -79,14 +119,14 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
     if not API_KEY:
         return "", 0.0
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = CONFIG["api"]["url"]
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/your-username/study-helper",
     }
     payload = {
-        "model": "google/gemini-2.0-flash-lite-001",
+        "model": CONFIG["api"]["models"]["summary"],
         "messages": [
             {
                 "role": "system",
@@ -137,7 +177,7 @@ async def _call_api_for_clean_text(
         logger.warning("OPENROUTER_API_KEY not set. Skipping API refinement.")
         return raw_text, 0.0
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = CONFIG["api"]["url"]
     
     context_msg = f"This is part {chunk_index} of {total_chunks}."
     
@@ -168,7 +208,7 @@ async def _call_api_for_clean_text(
     user_content = f"{context_msg}\n\nStudy notes to rewrite:\n\n{raw_text}"
 
     payload = {
-        "model": "google/gemini-2.0-flash-lite-001",
+        "model": CONFIG["api"]["models"]["rewrite"],
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
@@ -303,7 +343,7 @@ async def rewrite_and_synthesize_chunk(
 
 # edge-tts has a practical per-request text limit (~roughly a few thousand chars).
 # We split into chunks to avoid issues and to get more reliable output.
-MAX_CHUNK_CHARS = 3000
+MAX_CHUNK_CHARS = CONFIG["processing"]["max_tts_chunk_chars"]
 
 
 def split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
@@ -338,8 +378,8 @@ def split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
 async def synthesize_to_mp3(
     text: str,
     output_path: Path,
-    voice: str = "cs-CZ-VlastaNeural",
-    rate: str = "+0%",
+    voice: str = CONFIG["defaults"]["voice"],
+    rate: str = CONFIG["defaults"]["rate"],
 ) -> None:
     """
     Convert text to MP3 using edge-tts.
@@ -372,6 +412,7 @@ async def process_single_pdf(
     output_dir: Path,
     voice: str,
     rate: str,
+    only_synthesize: bool = False,
 ) -> None:
     """Full pipeline for one PDF file."""
     global TOTAL_API_COST
@@ -380,18 +421,43 @@ async def process_single_pdf(
     print(f"{'='*60}")
 
     # Step 1: Extract
-    print("  [1/3] Extracting text from PDF...")
-    raw_text = extract_text_from_pdf(pdf_path)
-    print(f"         Extracted {len(raw_text)} characters from {pdf_path.name}")
+    if not only_synthesize:
+        print("  [1/3] Extracting text from PDF...")
+        raw_text = extract_text_from_pdf(pdf_path)
+        print(f"         Extracted {len(raw_text)} characters from {pdf_path.name}")
 
-    txt_path = output_dir / pdf_path.with_suffix(".extracted.txt").name
-    txt_path.write_text(raw_text, encoding="utf-8")
+        txt_path = output_dir / pdf_path.with_suffix(".extracted.txt").name
+        txt_path.write_text(raw_text, encoding="utf-8")
 
     # Step 2: Clean & Summarize
+    debug_dir = output_dir / f"{pdf_path.stem}_chunks"
+    
+    if only_synthesize:
+        print("  [SKIP] Skipping extraction and LLM cleaning...")
+        if not debug_dir.exists():
+            print(f"         Error: {debug_dir} does not exist. Cannot only-synthesize.")
+            return
+        
+        cleaned_files = sorted(debug_dir.glob("chunk_*_cleaned.txt"))
+        if not cleaned_files:
+            print(f"         Error: No cleaned chunks found in {debug_dir}.")
+            return
+            
+        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks...")
+        tasks = []
+        for i, cleaned_file in enumerate(cleaned_files, 1):
+            refined_text = cleaned_file.read_text(encoding="utf-8")
+            part_filename = f"{pdf_path.stem}.part{i:02d}.mp3"
+            mp3_path = output_dir / part_filename
+            tasks.append(synthesize_to_mp3(refined_text, mp3_path, voice=voice, rate=rate))
+        
+        await asyncio.gather(*tasks)
+        print("         Synthesis complete.")
+        return
+
     print("  [2/3] Cleaning and Summarizing text...")
     
     # Create debug directory for chunks
-    debug_dir = output_dir / f"{pdf_path.stem}_chunks"
     debug_dir.mkdir(parents=True, exist_ok=True)
     
     raw_chunks, all_summaries = await clean_text(raw_text, debug_dir=debug_dir)
@@ -440,6 +506,7 @@ def main() -> None:
               python pdf2audio.py *.pdf
               python pdf2audio.py ./pdfs/ --voice cs-CZ-AntoninNeural
               python pdf2audio.py notes.pdf --rate "-15%"  # slower speech
+              python pdf2audio.py notes.pdf --only_synthesize --rate "+5%"
         """),
     )
     parser.add_argument(
@@ -450,20 +517,25 @@ def main() -> None:
     )
     parser.add_argument(
         "--voice",
-        default="cs-CZ-VlastaNeural",
+        default=CONFIG["defaults"]["voice"],
         choices=["cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"],
-        help="Czech TTS voice (default: VlastaNeural = female).",
+        help=f"Czech TTS voice (default: {CONFIG['defaults']['voice']}).",
     )
     parser.add_argument(
         "--rate",
-        default="+0%",
-        help='Speech rate, e.g. "+20%%" for faster or "-15%%" for slower (default: +0%%).',
+        default=CONFIG["defaults"]["rate"],
+        help=f"Speech rate, e.g. \"+20%%\" for faster or \"-15%%\" for slower (default: {CONFIG['defaults']['rate']}).",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=None,
+        default=CONFIG["defaults"]["output_dir"],
         help="Output directory for MP3 files (default: same as each PDF).",
+    )
+    parser.add_argument(
+        "--only_synthesize",
+        action="store_true",
+        help="Skip extraction and LLM cleaning; only synthesize existing cleaned text chunks.",
     )
 
     args = parser.parse_args()
@@ -492,7 +564,7 @@ def main() -> None:
             out_dir = args.output_dir or pdf_path.parent
             out_dir.mkdir(parents=True, exist_ok=True)
             try:
-                await process_single_pdf(pdf_path, out_dir, args.voice, args.rate)
+                await process_single_pdf(pdf_path, out_dir, args.voice, args.rate, only_synthesize=args.only_synthesize)
             except Exception as e:
                 print(f"  ✗ Error processing {pdf_path.name}: {e}", file=sys.stderr)
 
