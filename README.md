@@ -2,6 +2,8 @@
 
 `notes2audio` is a Python-based pipeline that converts PDF study notes into high-quality, "listenable" audio files (MP3). Unlike simple Text-to-Speech (TTS) tools, it uses Large Language Models (LLMs) to rewrite messy, bulleted notes into natural, fluid spoken-word scripts before synthesizing them.
 
+Check out the [examples/](examples/) directory to see the transformation from raw PDF to refined audio.
+
 ## 🚀 Features
 
 - **LLM-Powered Rewriting**: Automatically converts bullet points, abbreviations, and messy formatting into coherent sentences optimized for listening.
@@ -74,6 +76,7 @@ python run.py --only_synthesize notes.pdf
 - `run.py`: Main entry point and pipeline logic.
 - `config.yaml`: Configuration for API, prompts, and defaults.
 - `requirements.txt`: Python package dependencies.
+- `examples/`: Example files showing input, intermediate text, and output audio.
 - `[file]_chunks/`: (Auto-generated) Contains raw chunks, LLM prompts, and cleaned text for debugging.
 - `[file].extracted.txt`: (Auto-generated) The raw text extracted from the PDF.
 - `[file].txt`: (Auto-generated) The final rewritten script used for audio.
