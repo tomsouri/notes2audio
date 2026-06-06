@@ -58,14 +58,17 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
             ),
             "rewrite_system": (
                 "You are an expert tutor preparing audio-learning materials. "
-                "Rewrite the following raw study notes into a natural, fluid, spoken-word script in {language}. "
+                "Rewrite the provided study notes into a natural, fluid, spoken-word script in {language}.\n\n"
+                "Important Input Handling:\n"
+                "1. The input contains a <context> block providing summaries of surrounding parts for continuity. Do NOT include any of this context or information from the summaries in your output.\n"
+                "2. The input contains a <text_to_rewrite> block. This is the ONLY text you should rewrite.\n\n"
                 "Strictly follow these rules:\n"
                 "1. Convert all bullet points/lists into coherent, complete sentences.\n"
                 "2. Keep terminology accurate, but explain abbreviations if necessary for clarity.\n"
                 "3. Use a helpful, educational, and steady tone suitable for listening.\n"
                 "4. Remove visual markers like hyphens, bullets, or 'o' characters.\n"
                 "5. If there are clearly structured headers, use them to create smooth transitions.\n"
-                "6. Do not output anything other than the final script text."
+                "6. Output ONLY the final script text derived from <text_to_rewrite>. Do not include tags, headers, or any part of the provided context."
             ),
             "context_before": "Summaries of previous parts:",
             "context_after": "Summaries of upcoming parts:",
@@ -256,7 +259,10 @@ async def _call_api_for_clean_text(
         "HTTP-Referer": CONFIG["api"].get("referer", "https://github.com/your-username/notes2audio"),
     }
 
-    user_content = f"{context_msg}\n\nStudy notes to rewrite:\n\n{raw_text}"
+    user_content = (
+        f"<context>\n{context_msg}\n</context>\n\n"
+        f"<text_to_rewrite>\n{raw_text}\n</text_to_rewrite>"
+    )
 
     payload = {
         "model": CONFIG["api"]["models"]["rewrite"],
