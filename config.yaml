@@ -5,8 +5,8 @@ api:
   timeout: 60
   temperature: 0.1
   models:
-    summary: "google/gemini-2.0-flash-lite-001"
-    rewrite: "google/gemini-2.0-flash-lite-001"
+    summary: "openai/gpt-4o-mini"
+    rewrite: "openai/gpt-4o-mini"
   cost_per_1m_tokens:
     input: 0.075
     output: 0.30
