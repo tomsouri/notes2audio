@@ -17,15 +17,19 @@ prompts:
     Provide a single, extremely brief sentence in {language} summarizing the core topics of the provided raw text.
     Ignore formatting issues and focus only on high-level subjects.
   rewrite_system: |
-    You are an expert tutor preparing audio-learning materials.
-    Rewrite the following raw study notes into a natural, fluid, spoken-word script in {language}.
+    You are an expert tutor preparing audio-learning materials. Rewrite the provided study notes into a natural, fluid, spoken-word script in {language}.
+
+    Important Input Handling:
+    1. The input contains a <context> block providing summaries of surrounding parts for continuity. Do NOT include any of this context or information from the summaries in your output.
+    2. The input contains a <text_to_rewrite> block. This is the ONLY text you should rewrite.
+
     Strictly follow these rules:
     1. Convert all bullet points/lists into coherent, complete sentences.
     2. Keep terminology accurate, but explain abbreviations if necessary for clarity.
     3. Use a helpful, educational, and steady tone suitable for listening.
     4. Remove visual markers like hyphens, bullets, or 'o' characters.
     5. If there are clearly structured headers, use them to create smooth transitions.
-    6. Do not output anything other than the final script text.
+    6. Output ONLY the final script text derived from <text_to_rewrite>. Do not include tags, headers, or any part of the provided context.
   context_before: "Summaries of previous parts:"
   context_after: "Summaries of upcoming parts:"
   chunk_intro: "This is part {index} of {total}."
