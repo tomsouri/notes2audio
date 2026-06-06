@@ -1,8 +1,8 @@
 # notes2audio
 
-`notes2audio` is a Python-based pipeline that converts PDF study notes into high-quality, "listenable" audio files (MP3). Unlike simple Text-to-Speech (TTS) tools, it uses Large Language Models (LLMs) to rewrite messy, bulleted notes into natural, fluid spoken-word scripts before synthesizing them.
+`notes2audio` is a Python-based pipeline that converts PDF and DOCX study notes into high-quality, "listenable" audio files (MP3). Unlike simple Text-to-Speech (TTS) tools, it uses Large Language Models (LLMs) to rewrite messy, bulleted notes into natural, fluid spoken-word scripts before synthesizing them.
 
-Check out the [examples/](examples/) directory to see the transformation from raw PDF to refined audio.
+Check out the [examples/](examples/) directory to see the transformation from raw notes to refined audio.
 
 ## 🚀 Features
 
@@ -37,7 +37,7 @@ Check out the [examples/](examples/) directory to see the transformation from ra
 
 Modify `config.yaml` to adjust the behavior:
 
-- **api**: Set the LLM model (default: `gemini-2.0-flash-lite`), timeout, and temperature.
+- **api**: Set the LLM model (default: `openai/gpt-4o-mini`), timeout, and temperature.
 - **prompts**: Customize how the AI summarizes and rewrites your notes.
 - **processing**: Tune chunk sizes (`max_api_chunk_chars`, `max_tts_chunk_chars`) and concurrency (`max_concurrent_tasks`).
 - **defaults**: Set your preferred language, voice (e.g., `cs-CZ-AntoninNeural`), and speech rate.
@@ -45,17 +45,18 @@ Modify `config.yaml` to adjust the behavior:
 ## 📖 Usage
 
 ### Basic Usage
-Convert a single PDF file:
+Convert a single PDF or DOCX file:
 ```bash
 python run.py notes.pdf
+python run.py notes.docx
 ```
 
 ### Multiple Files or Directories
 ```bash
 # Multiple files
-python run.py chapter1.pdf chapter2.pdf
+python run.py chapter1.pdf notes.docx
 
-# Whole directory
+# Whole directory (finds all PDFs and DOCX files)
 python run.py ./study_materials/
 ```
 
@@ -78,12 +79,12 @@ python run.py --only_synthesize notes.pdf
 - `requirements.txt`: Python package dependencies.
 - `examples/`: Example files showing input, intermediate text, and output audio.
 - `[file]_chunks/`: (Auto-generated) Contains raw chunks, LLM prompts, and cleaned text for debugging.
-- `[file].extracted.txt`: (Auto-generated) The raw text extracted from the PDF.
+- `[file].extracted.txt`: (Auto-generated) The raw text extracted from the PDF or DOCX.
 - `[file].txt`: (Auto-generated) The final rewritten script used for audio.
 
 ## 📝 How it Works
 
-1. **Extraction**: Uses `PyMuPDF` to pull raw text from your PDF pages.
+1. **Extraction**: Uses `PyMuPDF` for PDFs and `python-docx` for DOCX files to pull raw text.
 2. **Summarization**: Generates brief summaries for every chunk in parallel to provide context.
 3. **Rewriting**: Sends each chunk to an LLM along with the "neighboring" summaries. The AI rewrites the notes into a narrative script.
 4. **Synthesis**: Uses `edge-tts` to convert the rewritten scripts into MP3 parts.
