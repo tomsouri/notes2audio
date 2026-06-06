@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-pdf2audio.py — Convert PDF files to audio (MP3) using PyMuPDF + edge-tts (OpenRouter for cleaning).
+run.py — Convert PDF or DOCX files to audio (MP3) using PyMuPDF/python-docx + edge-tts (OpenRouter for cleaning).
 
 Usage:
     # Single file
-    python pdf2audio.py notes.pdf
+    python run.py notes.pdf
+    python run.py notes.docx
 
     # Multiple files
-    python pdf2audio.py notes1.pdf notes2.pdf
+    python run.py notes1.pdf notes2.docx
 
     # Whole directory
-    python pdf2audio.py ./study_materials/
+    python run.py ./study_materials/
 
     # Options
-    python pdf2audio.py --voice cs-CZ-AntoninNeural --rate "-10%" --output-dir ./audio notes.pdf
+    python run.py --voice cs-CZ-AntoninNeural --rate "-10%" --output-dir ./audio notes.pdf
 """
 
 from __future__ import annotations
@@ -137,6 +138,19 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
     return "\n\n".join(pages)
 
 
+def extract_text_from_docx(docx_path: Path) -> str:
+    """Extract text from a DOCX using python-docx."""
+    from docx import Document
+
+    doc = Document(docx_path)
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+
+    if not paragraphs:
+        raise ValueError(f"No text could be extracted from {docx_path}")
+
+    return "\n\n".join(paragraphs)
+
+
 # ---------------------------------------------------------------------------
 # Step 2: Text cleanup
 # ---------------------------------------------------------------------------
@@ -171,7 +185,12 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
             },
             {"role": "user", "content": chunk_text}
         ],
-        "temperature": CONFIG["api"]["temperature"]
+        "temperature": CONFIG["api"]["temperature"],
+        "provider": { 
+             "require_parameters": True,
+             "zdr": True,
+             "data_collection": "deny",
+        }
     }
 
     if debug_dir:
@@ -183,6 +202,13 @@ async def _get_chunk_summary(chunk_text: str, debug_dir: Path | None = None, chu
         response = await asyncio.to_thread(
             requests.post, url, headers=headers, data=json.dumps(payload), timeout=CONFIG["api"]["timeout"]
         )
+        if response.status_code != 200:
+            try:
+                error_info = response.json()
+                logger.error(f"OpenRouter API Error (Status {response.status_code}): {json.dumps(error_info, indent=2, ensure_ascii=False)}")
+            except Exception:
+                logger.error(f"OpenRouter API Error (Status {response.status_code}): {response.text}")
+
         response.raise_for_status()
         data = response.json()
         usage = data.get("usage", {})
@@ -250,6 +276,13 @@ async def _call_api_for_clean_text(
         response = await asyncio.to_thread(
             requests.post, url, headers=headers, data=json.dumps(payload), timeout=CONFIG["api"]["timeout"]
         )
+        if response.status_code != 200:
+            try:
+                error_info = response.json()
+                logger.error(f"OpenRouter API Error (Status {response.status_code}): {json.dumps(error_info, indent=2, ensure_ascii=False)}")
+            except Exception:
+                logger.error(f"OpenRouter API Error (Status {response.status_code}): {response.text}")
+
         response.raise_for_status()
         data = response.json()
 
@@ -461,30 +494,36 @@ async def synthesize_to_mp3(
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-async def process_single_pdf(
-    pdf_path: Path,
+async def process_single_file(
+    file_path: Path,
     output_dir: Path,
     voice: str,
     rate: str,
     only_synthesize: bool = False,
 ) -> None:
-    """Full pipeline for one PDF file."""
+    """Full pipeline for one file (PDF or DOCX)."""
     global TOTAL_API_COST
     print(f"\n{'='*60}")
-    print(f"Processing: {pdf_path.name}")
+    print(f"Processing: {file_path.name}")
     print(f"{'='*60}")
 
     # Step 1: Extract
     if not only_synthesize:
-        print("  [1/3] Extracting text from PDF...")
-        raw_text = extract_text_from_pdf(pdf_path)
-        print(f"         Extracted {len(raw_text)} characters from {pdf_path.name}")
+        print(f"  [1/3] Extracting text from {file_path.suffix.upper()[1:]}...")
+        if file_path.suffix.lower() == ".pdf":
+            raw_text = extract_text_from_pdf(file_path)
+        elif file_path.suffix.lower() == ".docx":
+            raw_text = extract_text_from_docx(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_path.suffix}")
+        
+        print(f"         Extracted {len(raw_text)} characters from {file_path.name}")
 
-        txt_path = output_dir / pdf_path.with_suffix(".extracted.txt").name
+        txt_path = output_dir / file_path.with_suffix(".extracted.txt").name
         txt_path.write_text(raw_text, encoding="utf-8")
 
     # Step 2: Clean & Summarize
-    debug_dir = output_dir / f"{pdf_path.stem}_chunks"
+    debug_dir = output_dir / f"{file_path.stem}_chunks"
     
     if only_synthesize:
         print("  [SKIP] Skipping extraction and LLM cleaning...")
@@ -509,7 +548,7 @@ async def process_single_pdf(
         total_parts = len(cleaned_files)
         for i, cleaned_file in enumerate(cleaned_files, 1):
             refined_text = cleaned_file.read_text(encoding="utf-8")
-            part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=pdf_path.stem, index=i)
+            part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
             mp3_path = output_dir / part_filename
             tasks.append(synth_with_sem(
                 refined_text, mp3_path, voice, rate,
@@ -541,7 +580,7 @@ async def process_single_pdf(
 
     tasks = []
     for i, chunk in enumerate(raw_chunks, 1):
-        part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=pdf_path.stem, index=i)
+        part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
         mp3_path = output_dir / part_filename
         
         previous_summaries = all_summaries[:i-1]
@@ -564,29 +603,30 @@ async def process_single_pdf(
 
     # Optionally save intermediate text for inspection / LLM rewriting
     combined_clean = "\n\n".join(refined_chunks)
-    txt_path = output_dir / pdf_path.with_suffix(".txt").name
+    txt_path = output_dir / file_path.with_suffix(".txt").name
     txt_path.write_text(combined_clean, encoding="utf-8")
     print(f"         Intermediate text saved to: {txt_path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Convert PDF study notes to audio files (MP3).",
+        description="Convert PDF and DOCX study notes to audio files (MP3).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
-              python pdf2audio.py notes.pdf
-              python pdf2audio.py *.pdf
-              python pdf2audio.py ./pdfs/ --voice cs-CZ-AntoninNeural
-              python pdf2audio.py notes.pdf --rate "-15%"  # slower speech
-              python pdf2audio.py notes.pdf --only_synthesize --rate "+5%"
+              python run.py notes.pdf
+              python run.py notes.docx
+              python run.py *.pdf *.docx
+              python run.py ./notes/ --voice cs-CZ-AntoninNeural
+              python run.py notes.pdf --rate "-15%"  # slower speech
+              python run.py notes.pdf --only_synthesize --rate "+5%"
         """),
     )
     parser.add_argument(
         "inputs",
         nargs="+",
         type=Path,
-        help="PDF file(s) or director(ies) containing PDFs.",
+        help="PDF or DOCX file(s) or director(ies) containing them.",
     )
     parser.add_argument(
         "--language",
@@ -608,7 +648,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=CONFIG["defaults"]["output_dir"],
-        help="Output directory for MP3 files (default: same as each PDF).",
+        help="Output directory for MP3 files (default: same as each input file).",
     )
     parser.add_argument(
         "--only_synthesize",
@@ -623,38 +663,43 @@ def main() -> None:
     CONFIG["defaults"]["voice"] = args.voice
     CONFIG["defaults"]["rate"] = args.rate
 
-    # Collect all PDF paths
-    pdf_files: list[Path] = []
+    # Collect all file paths
+    supported_extensions = {".pdf", ".docx"}
+    input_files: list[Path] = []
     for inp in args.inputs:
         if inp.is_dir():
-            found = sorted(inp.glob("*.pdf"))
-            if not found:
-                print(f"Warning: no PDFs found in {inp}", file=sys.stderr)
-            pdf_files.extend(found)
-        elif inp.is_file() and inp.suffix.lower() == ".pdf":
-            pdf_files.append(inp)
+            for ext in supported_extensions:
+                found = sorted(inp.glob(f"*{ext}"))
+                input_files.extend(found)
+            if not input_files:
+                print(f"Warning: no supported files found in {inp}", file=sys.stderr)
+        elif inp.is_file() and inp.suffix.lower() in supported_extensions:
+            input_files.append(inp)
         else:
-            print(f"Warning: skipping {inp} (not a PDF or directory)", file=sys.stderr)
+            print(f"Warning: skipping {inp} (unsupported file type or directory)", file=sys.stderr)
 
-    if not pdf_files:
-        print("Error: no PDF files to process.", file=sys.stderr)
+    if not input_files:
+        print("Error: no supported files to process.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(pdf_files)} PDF file(s) to convert.")
+    # De-duplicate and sort
+    input_files = sorted(list(set(input_files)))
+
+    print(f"Found {len(input_files)} file(s) to convert.")
 
     async def run_all():
-        for pdf_path in pdf_files:
-            out_dir = args.output_dir or pdf_path.parent
+        for file_path in input_files:
+            out_dir = args.output_dir or file_path.parent
             out_dir.mkdir(parents=True, exist_ok=True)
             try:
-                await process_single_pdf(pdf_path, out_dir, args.voice, args.rate, only_synthesize=args.only_synthesize)
+                await process_single_file(file_path, out_dir, args.voice, args.rate, only_synthesize=args.only_synthesize)
             except Exception as e:
-                print(f"  ✗ Error processing {pdf_path.name}: {e}", file=sys.stderr)
+                print(f"  ✗ Error processing {file_path.name}: {e}", file=sys.stderr)
 
     asyncio.run(run_all())
 
     print(f"\n{'='*60}")
-    print(f"Done! Processed {len(pdf_files)} file(s).")
+    print(f"Done! Processed {len(input_files)} file(s).")
     print(f"Total OpenRouter API cost: ${TOTAL_API_COST:.6f}")
 
 
