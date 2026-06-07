@@ -33,6 +33,22 @@ prompts:
   context_before: "Summaries of previous parts:"
   context_after: "Summaries of upcoming parts:"
   chunk_intro: "This is part {index} of {total}."
+  qa_system_maybe: |
+    The end of the input may contain questions and answers. If it does, handle it as follows:
+    1. Identify the questions and their corresponding answers.
+    2. For each question, provide it clearly.
+    3. After each question, insert the marker [PAUSE].
+    4. Then provide the answer.
+    5. Maintain this Q - [PAUSE] - A structure for all question-answer pairs.
+  qa_system_last_chunk: |
+
+
+    The end of the provided input contains a section with questions and answers. Handle it as follows:
+    1. Identify the questions and their corresponding answers.
+    2. For each question, provide it clearly.
+    3. After each question, insert the marker [PAUSE].
+    4. Then provide the answer.
+    5. Maintain this Q - [PAUSE] - A structure for all question-answer pairs.
 
 processing:
   max_api_chunk_chars: 5000
@@ -41,6 +57,7 @@ processing:
   cleanup_replacements:
     - ["*", ""]
     - ["#", ""]
+  pause_duration: "3s"
 
 defaults:
   language: "Czech"

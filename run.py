@@ -72,13 +72,31 @@ def load_config(config_path: Path = Path("config.yaml")) -> dict:
             ),
             "context_before": "Summaries of previous parts:",
             "context_after": "Summaries of upcoming parts:",
-            "chunk_intro": "This is part {index} of {total}."
+            "chunk_intro": "This is part {index} of {total}.",
+            "qa_system_maybe": (
+                "\n\nThe end of the input may contain questions and answers. If it does, handle it as follows:"
+                "1. Identify the questions and their corresponding answers.\n"
+                "2. For each question, provide it clearly.\n"
+                "3. After each question, insert the marker [PAUSE].\n"
+                "4. Then provide the answer.\n"
+                "5. Maintain this Q - [PAUSE] - A structure for all question-answer pairs."
+            ),
+            "qa_system_last_chunk": (
+                "\n\nThe end of the provided input contains a section with questions and answers. "
+                "Handle it as follows:\n"
+                "1. Identify the questions and their corresponding answers.\n"
+                "2. For each question, provide it clearly.\n"
+                "3. After each question, insert the marker [PAUSE].\n"
+                "4. Then provide the answer.\n"
+                "5. Maintain this Q - [PAUSE] - A structure for all question-answer pairs."
+            )
         },
         "processing": {
             "max_api_chunk_chars": 500,
             "max_tts_chunk_chars": 3000,
             "max_concurrent_tasks": 5,
-            "cleanup_replacements": [["*", ""], ["#", ""]]
+            "cleanup_replacements": [["*", ""], ["#", ""]],
+            "pause_duration": "3s"
         },
         "defaults": {
             "language": "Czech",
@@ -229,7 +247,8 @@ async def _call_api_for_clean_text(
     total_chunks: int,
     previous_summaries: list[str],
     future_summaries: list[str],
-    debug_dir: Path | None = None
+    debug_dir: Path | None = None,
+    has_qa_section: bool = False
 ) -> tuple[str, float]:
     """
     Calls OpenRouter API to refine a single chunk of text with context.
@@ -252,6 +271,12 @@ async def _call_api_for_clean_text(
 
     language = CONFIG["defaults"].get("language", "Czech")
     system_prompt = CONFIG["prompts"]["rewrite_system"].format(language=language)
+    
+    if has_qa_section:
+        if chunk_index == total_chunks:
+            system_prompt += CONFIG["prompts"].get("qa_system_last_chunk", "")
+        else:
+            system_prompt += CONFIG["prompts"].get("qa_system_maybe", "")
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -378,7 +403,8 @@ async def rewrite_and_synthesize_chunk(
     voice: str,
     rate: str,
     mp3_path: Path | None,
-    debug_dir: Path | None = None
+    debug_dir: Path | None = None,
+    has_qa_section: bool = False
 ) -> tuple[str, float]:
     """
     Wraps rewriting and TTS synthesis into a single async flow.
@@ -394,7 +420,8 @@ async def rewrite_and_synthesize_chunk(
         total_chunks, 
         previous_summaries, 
         future_summaries, 
-        debug_dir=debug_dir
+        debug_dir=debug_dir,
+        has_qa_section=has_qa_section
     )
     
     if debug_dir:
@@ -422,28 +449,38 @@ MAX_CHUNK_CHARS = CONFIG["processing"]["max_tts_chunk_chars"]
 def split_into_chunks(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
     """
     Split text into chunks at sentence boundaries ('. ') so each chunk
-    is at most max_chars long.
+    is at most max_chars long. Keeps [PAUSE] markers as separate chunks.
     """
-    sentences = re.split(r"(?<=\.)\s+", text)
+    # Split by [PAUSE] (keeping it) or sentence boundaries
+    parts = re.split(r"(\[PAUSE\])", text)
     chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
 
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
+    for part in parts:
+        if not part:
+            continue
+        if part == "[PAUSE]":
+            chunks.append(part)
             continue
 
-        if current_len + len(sentence) + 1 > max_chars and current:
+        sentences = re.split(r"(?<=\.)\s+", part)
+        current: list[str] = []
+        current_len = 0
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            if current_len + len(sentence) + 1 > max_chars and current:
+                chunks.append(" ".join(current))
+                current = []
+                current_len = 0
+
+            current.append(sentence)
+            current_len += len(sentence) + 1
+
+        if current:
             chunks.append(" ".join(current))
-            current = []
-            current_len = 0
-
-        current.append(sentence)
-        current_len += len(sentence) + 1
-
-    if current:
-        chunks.append(" ".join(current))
 
     return chunks
 
@@ -467,15 +504,52 @@ async def synthesize_to_mp3(
     total = len(chunks)
     prefix = f"[{label}] " if label else ""
 
+    pause_duration = CONFIG["processing"].get("pause_duration", "3s")
+    # Extract lang e.g. cs-CZ from cs-CZ-VlastaNeural
+    lang_parts = voice.split("-")
+    lang_code = f"{lang_parts[0]}-{lang_parts[1]}" if len(lang_parts) >= 2 else "en-US"
+
     with open(output_path, "wb") as out_file:
         for i, chunk in enumerate(chunks, start=1):
-            # Skip chunks that only contain punctuation or whitespace to avoid "No audio was received" error
-            if not any(c.isalnum() for c in chunk):
-                logger.warning(f"{prefix}Skipping non-speakable chunk {i}/{total} ({len(chunk)} chars): '{chunk}'")
-                continue
+            if chunk == "[PAUSE]":
+                logger.info(f"{prefix}Inserting silence ({pause_duration})...")
+                # Manual silence insertion using ffmpeg to avoid flakey SSML support
+                try:
+                    # Match edge-tts default common format: 24kHz, mono, 48k bitrate
+                    cmd = [
+                        "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+                        "-t", pause_duration, "-b:a", "48k", "-f", "mp3", "pipe:1"
+                    ]
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
+                    if process.returncode == 0:
+                        out_file.write(stdout)
+                        continue
+                    else:
+                        logger.error(f"ffmpeg failed: {stderr.decode()}")
+                except Exception as e:
+                    logger.error(f"Failed to manually insert silence via ffmpeg: {e}")
 
-            logger.info(f"{prefix}Synthesizing chunk {i}/{total} ({len(chunk)} chars)...")
-            communicate = edge_tts.Communicate(chunk, voice, rate=rate)
+                # Fallback to SSML if ffmpeg is not available or fails
+                ssml = (
+                    f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+                    f'xml:lang="{lang_code}"><voice name="{voice}">'
+                    f'<break time="{pause_duration}" /></voice></speak>'
+                )
+                communicate = edge_tts.Communicate(ssml)
+            else:
+                # Skip chunks that only contain punctuation or whitespace to avoid "No audio was received" error
+                if not any(c.isalnum() for c in chunk):
+                    logger.warning(f"{prefix}Skipping non-speakable chunk {i}/{total} ({len(chunk)} chars): '{chunk}'")
+                    continue
+
+                logger.info(f"{prefix}Synthesizing chunk {i}/{total} ({len(chunk)} chars)...")
+                communicate = edge_tts.Communicate(chunk, voice, rate=rate)
+
             try:
                 audio_count = 0
                 async for message in communicate.stream():
@@ -508,6 +582,7 @@ async def process_single_file(
     rate: str,
     only_synthesize: bool = False,
     one_audio: bool = False,
+    has_qa_section: bool = False,
 ) -> None:
     """Full pipeline for one file (PDF or DOCX)."""
     global TOTAL_API_COST
@@ -595,7 +670,8 @@ async def process_single_file(
     async def process_with_sem(chunk, i, tp, ps, fs, v, r, mp, dd):
         async with sem:
             return await rewrite_and_synthesize_chunk(
-                chunk, i, tp, ps, fs, v, r, mp, debug_dir=dd
+                chunk, i, tp, ps, fs, v, r, mp, debug_dir=dd, 
+                has_qa_section=has_qa_section
             )
 
     tasks = []
@@ -687,6 +763,11 @@ def main() -> None:
         action="store_true",
         help="Join all rewritten parts into a single text and synthesize a single output audio file per input.",
     )
+    parser.add_argument(
+        "--has_qa_section",
+        action="store_true",
+        help="Signal that the input might contain a QA section. Rewrites QA sections with [PAUSE] markers.",
+    )
 
     args = parser.parse_args()
 
@@ -730,7 +811,8 @@ def main() -> None:
                     args.voice, 
                     args.rate, 
                     only_synthesize=args.only_synthesize,
-                    one_audio=args.one_audio_per_input_file
+                    one_audio=args.one_audio_per_input_file,
+                    has_qa_section=args.has_qa_section
                 )
             except Exception as e:
                 print(f"  ✗ Error processing {file_path.name}: {e}", file=sys.stderr)
