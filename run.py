@@ -377,7 +377,7 @@ async def rewrite_and_synthesize_chunk(
     future_summaries: list[str],
     voice: str,
     rate: str,
-    mp3_path: Path,
+    mp3_path: Path | None,
     debug_dir: Path | None = None
 ) -> tuple[str, float]:
     """
@@ -401,10 +401,11 @@ async def rewrite_and_synthesize_chunk(
         (debug_dir / f"chunk_{chunk_index:03d}_cleaned.txt").write_text(refined_text, encoding="utf-8")
         
     # 2. Synthesize
-    await synthesize_to_mp3(
-        refined_text, mp3_path, voice=voice, rate=rate,
-        label=f"Part {chunk_index}/{total_chunks}"
-    )
+    if mp3_path:
+        await synthesize_to_mp3(
+            refined_text, mp3_path, voice=voice, rate=rate,
+            label=f"Part {chunk_index}/{total_chunks}"
+        )
     
     return refined_text, rewrite_cost
 
@@ -506,6 +507,7 @@ async def process_single_file(
     voice: str,
     rate: str,
     only_synthesize: bool = False,
+    one_audio: bool = False,
 ) -> None:
     """Full pipeline for one file (PDF or DOCX)."""
     global TOTAL_API_COST
@@ -542,26 +544,35 @@ async def process_single_file(
             print(f"         Error: No cleaned chunks found in {debug_dir}.")
             return
             
-        print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
-        
-        sem = asyncio.Semaphore(CONFIG["processing"]["max_concurrent_tasks"])
-        
-        async def synth_with_sem(text, path, v, r, l):
-            async with sem:
-                await synthesize_to_mp3(text, path, voice=v, rate=r, label=l)
+        if one_audio:
+            print(f"  [3/3] Joining {len(cleaned_files)} chunks and synthesizing into a single audio file...")
+            all_text = []
+            for cf in cleaned_files:
+                all_text.append(cf.read_text(encoding="utf-8"))
+            combined_text = "\n\n".join(all_text)
+            mp3_path = output_dir / f"{file_path.stem}.mp3"
+            await synthesize_to_mp3(combined_text, mp3_path, voice=voice, rate=rate, label="Full")
+        else:
+            print(f"  [3/3] Synthesizing {len(cleaned_files)} existing chunks (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
+            
+            sem = asyncio.Semaphore(CONFIG["processing"]["max_concurrent_tasks"])
+            
+            async def synth_with_sem(text, path, v, r, l):
+                async with sem:
+                    await synthesize_to_mp3(text, path, voice=v, rate=r, label=l)
 
-        tasks = []
-        total_parts = len(cleaned_files)
-        for i, cleaned_file in enumerate(cleaned_files, 1):
-            refined_text = cleaned_file.read_text(encoding="utf-8")
-            part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
-            mp3_path = output_dir / part_filename
-            tasks.append(synth_with_sem(
-                refined_text, mp3_path, voice, rate,
-                f"Part {i}/{total_parts}"
-            ))
-        
-        await asyncio.gather(*tasks)
+            tasks = []
+            total_parts = len(cleaned_files)
+            for i, cleaned_file in enumerate(cleaned_files, 1):
+                refined_text = cleaned_file.read_text(encoding="utf-8")
+                part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
+                mp3_path = output_dir / part_filename
+                tasks.append(synth_with_sem(
+                    refined_text, mp3_path, voice, rate,
+                    f"Part {i}/{total_parts}"
+                ))
+            
+            await asyncio.gather(*tasks)
         print("         Synthesis complete.")
         return
 
@@ -574,7 +585,10 @@ async def process_single_file(
     total_chunks = len(raw_chunks)
     
     # Step 3: Rewrite and Synthesize in parallel
-    print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
+    if one_audio:
+        print(f"  [3/3] Rewriting {total_chunks} chunks in parallel, then synthesizing to a single audio file...")
+    else:
+        print(f"  [3/3] Rewriting and Synthesizing {total_chunks} chunks in parallel (max {CONFIG['processing']['max_concurrent_tasks']} at once)...")
     
     sem = asyncio.Semaphore(CONFIG["processing"]["max_concurrent_tasks"])
     
@@ -586,8 +600,11 @@ async def process_single_file(
 
     tasks = []
     for i, chunk in enumerate(raw_chunks, 1):
-        part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
-        mp3_path = output_dir / part_filename
+        if one_audio:
+            mp3_path = None
+        else:
+            part_filename = CONFIG["defaults"]["filename_pattern"].format(stem=file_path.stem, index=i)
+            mp3_path = output_dir / part_filename
         
         previous_summaries = all_summaries[:i-1]
         future_summaries = all_summaries[i:]
@@ -612,6 +629,10 @@ async def process_single_file(
     txt_path = output_dir / file_path.with_suffix(".txt").name
     txt_path.write_text(combined_clean, encoding="utf-8")
     print(f"         Intermediate text saved to: {txt_path}")
+
+    if one_audio:
+        mp3_path = output_dir / f"{file_path.stem}.mp3"
+        await synthesize_to_mp3(combined_clean, mp3_path, voice=voice, rate=rate, label="Full")
 
 
 def main() -> None:
@@ -661,6 +682,11 @@ def main() -> None:
         action="store_true",
         help="Skip extraction and LLM cleaning; only synthesize existing cleaned text chunks.",
     )
+    parser.add_argument(
+        "--one_audio_per_input_file",
+        action="store_true",
+        help="Join all rewritten parts into a single text and synthesize a single output audio file per input.",
+    )
 
     args = parser.parse_args()
 
@@ -698,7 +724,14 @@ def main() -> None:
             out_dir = args.output_dir or file_path.parent
             out_dir.mkdir(parents=True, exist_ok=True)
             try:
-                await process_single_file(file_path, out_dir, args.voice, args.rate, only_synthesize=args.only_synthesize)
+                await process_single_file(
+                    file_path, 
+                    out_dir, 
+                    args.voice, 
+                    args.rate, 
+                    only_synthesize=args.only_synthesize,
+                    one_audio=args.one_audio_per_input_file
+                )
             except Exception as e:
                 print(f"  ✗ Error processing {file_path.name}: {e}", file=sys.stderr)
 
